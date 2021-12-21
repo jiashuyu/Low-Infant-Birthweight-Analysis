@@ -1,0 +1,240 @@
+---
+title: 'STAT 426: Project 2'
+author: "Spring 2021, by Shuyu Jia (shuyuj2)"
+date: 'Due: Wednesday, May 12 by 11:59 PM'
+output:
+  pdf_document:
+    toc: no
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+  knitr::opts_chunk$set(include = TRUE)  # TRUE for solution; FALSE for questions set
+  knitr::opts_chunk$set(echo = TRUE)
+  knitr::opts_chunk$set(message = FALSE)
+  knitr::opts_chunk$set(warning = FALSE)
+  knitr::opts_chunk$set(fig.height = 6, fig.width = 8, out.width = '100%', fig.align = "center")
+  options(width = 90)
+```
+
+```{css, echo=FALSE}
+.solution {
+background-color: #CCDDFF;
+}
+```
+
+# 1. Introduction
+
+Low birthweight is when a baby is born weighing less than 5 pounds, 8 ounces (2.5 kg). The average newborn weight is about 8 pounds (3.6 kg). Some babies with low birthweight are healthy, even though they are small. But being low birthweight can cause serious health problems for some babies. A baby with low birthweight may have trouble eating, gaining weight, and fighting off infections. Some low-birthweight babies may have long-term health problems, too. About 1 in 12 babies (about 8 percent) in the United States is born with low birthweight.
+
+There are two main reasons why a baby may be born with low birthweight. One is premature birth. The earlier a baby is born, the lower her birthweight may be. The other is fetal growth restriction (FGR). Some growth-restricted babies may have low birthweight because their parents are small, others may because something slowed or stopped their growth in the womb.
+
+In this project, we would like to find out the factors that are associated with low infant birthweight and then use these factors to predict low birthweight.
+
+# 2. Data
+
+This dataset includes birthweights and several variables concerning the mother for 189 births at Baytowne Medical Center in Springfield, Massachusetts in 1986. The description of variables are as follows:
+
+- `low` --- indicator of birth weights less than 2.5 kg (binary variable)
+- `age` --- mother's age in years (continuous variable)
+- `lwt` --- mother's weight in pounds at last menstrual period (continuous variable)
+- `race` --- mother's race (1 = white, 2 = black, 3 = other) (categorical variable)
+- `smoke` --- smoking status during pregnancy (binary variable)
+- `ptl` --- number of previous premature labours (ordinal variable)
+- `ht` --- history of hypertension (binary variable)
+- `ui` --- presence of uterine irritability (binary variable)
+- `ftv` --- number of physician visits during the first trimester (ordinal variable)
+- `bwt` --- birth weight in grams (continuous variable)
+
+```{r}
+library(MASS)
+data(birthwt)
+summary(birthwt[,c("age", "lwt", "bwt")])
+```
+
+```{r}
+par(mfrow=c(1,3))
+boxplot(birthwt[, "age"], xlab = 'mother\'s age')
+boxplot(birthwt[, "lwt"], xlab = 'mother\'s weight (pounds)')
+boxplot(birthwt[, "bwt"], xlab = 'birth wright (grams)')
+```
+
+```{r}
+table(birthwt$low)
+prop.table(table(birthwt$low))
+```
+
+```{r}
+table(birthwt$race)
+prop.table(table(birthwt$race))
+```
+
+```{r}
+table(birthwt$smoke)
+prop.table(table(birthwt$smoke))
+```
+
+```{r}
+table(birthwt$ptl)
+prop.table(table(birthwt$ptl))
+```
+
+```{r}
+table(birthwt$ht)
+prop.table(table(birthwt$ht))
+```
+
+```{r}
+table(birthwt$ui)
+prop.table(table(birthwt$ui))
+```
+
+```{r}
+table(birthwt$ftv)
+prop.table(table(birthwt$ftv))
+```
+
+```{r}
+library(GGally)
+ggcorr(birthwt, label = TRUE)
+```
+
+Since the binary variable `low` is generated from the continuous variable `bwt`, it is expected for them to have a strong correlation, and we should not use `bwt` to predict `low`. Except for `low` and `bwt`, no other pair of variables has any strong correlation.
+
+# 3. Research Question One
+
+What factors are associated with low infant birthweight (less than 2.5 kg)?
+
+First, we consider all 8 variables and all possible 2-way interactions, and perform a backward selection.
+
+```{r}
+birthwt$race = as.factor(birthwt$race)
+full_mod = glm(low ~ (age + lwt + race + smoke + ptl + ht + ui + ftv)^2, 
+               family = binomial, data = birthwt)
+back_mod = step(full_mod, direction = "backward", trace = 0)
+summary(back_mod)
+```
+
+From the summary we can see that there are 5 interaction terms (`age:ptl`, `age:ftv`, `lwt:smoke`, `lwt:ui`, `ptl:ui`) have reasonably low p-values. We included them along with all 8 variables and modify our full model, and then ran backward selection again.
+
+```{r}
+full_mod = glm(low ~ age + lwt + race + smoke + ptl + ht + ui + ftv + 
+                     age*ptl + age*ftv + lwt*smoke + lwt*ui + ptl*ui, 
+               family = binomial, data = birthwt)
+back_mod = step(full_mod, direction = "backward", trace = 0)
+summary(back_mod)
+```
+
+Now we ran a forward selection.
+
+```{r}
+null_mod = glm(low ~ 1, data = birthwt, family = binomial)
+forw_mod = step(null_mod, scope = list(lower = null_mod, upper = full_mod), 
+                direction = "forward", trace = 0)
+summary(forw_mod)
+```
+
+```{r}
+c(AIC(back_mod), AIC(forw_mod))
+```
+
+The backward model has a lower AIC score, so we chose it as our best model. From the backward selected model, `lwt`, `ptl`, `ht`, `ftv`, `age:ftv`, `ptl:ui` are all significant factors that are associated with low infant birthweight at a level of 0.05. 
+
+# 4. Research Question Two
+
+How well can these factors predict low birthweight?
+
+Predictive power:
+
+```{r}
+cor(birthwt$low, fitted(back_mod))
+```
+
+```{r}
+as.numeric((logLik(back_mod) - logLik(null_mod)) / (0 - logLik(null_mod)))
+```
+
+```{r}
+logit_mod = glm(low ~ age + lwt + smoke + ptl + ht + ui + ftv + 
+    age*ftv + lwt*smoke + lwt*ui + ptl*ui, family = binomial(link = "logit"), data = birthwt)
+probit_mod = glm(low ~ age + lwt + smoke + ptl + ht + ui + ftv + 
+    age*ftv + lwt*smoke + lwt*ui + ptl*ui, family = binomial(link = "probit"), data = birthwt)
+cloglog_mod = glm(low ~ age + lwt + smoke + ptl + ht + ui + ftv + 
+    age*ftv + lwt*smoke + lwt*ui + ptl*ui, family = binomial(link = "cloglog"), data = birthwt)
+```
+
+```{r}
+# AUC for logit link
+pihat = fitted(logit_mod)
+mean(outer(pihat[birthwt$low==1], pihat[birthwt$low==0], ">") + 
+           0.5 * outer(pihat[birthwt$low==1], pihat[birthwt$low==0], "=="))
+```
+
+```{r}
+# AUC for probit link
+pihat = fitted(probit_mod)
+mean(outer(pihat[birthwt$low==1], pihat[birthwt$low==0], ">") + 
+           0.5 * outer(pihat[birthwt$low==1], pihat[birthwt$low==0], "=="))
+```
+
+```{r}
+# AUC for cloglog link
+pihat = fitted(cloglog_mod)
+mean(outer(pihat[birthwt$low==1], pihat[birthwt$low==0], ">") + 
+           0.5 * outer(pihat[birthwt$low==1], pihat[birthwt$low==0], "=="))
+```
+
+The logit link has the highest AUC, so we chose logit link. The ROC curve is as follows:
+
+```{r}
+pihat = fitted(logit_mod)
+false.neg = c(0,cumsum(tapply(birthwt$low,pihat,sum)))
+true.neg = c(0,cumsum(table(pihat))) - false.neg
+plot(1-true.neg/max(true.neg), 1-false.neg/max(false.neg), type="l", main="ROC Curve", xlab="1 - Specificity", ylab="Sensitivity", asp=1)
+abline(a=0, b=1, lty=2, col="blue")
+```
+
+Evaluation metrics for prediction:
+
+```{r}
+# max accuracy: 77% --- 50% sens, 90% spec
+# 100% sens: 0.05 --- 17% spec
+# 98% sens: 0.11 --- 30% spec
+# 95% sens: 0.13 --- 32% spec
+# 90% sens: 0.19 --- 50% spec
+# 80% sens: 0.27 --- 67% spec
+pi0 = 0.5
+table(y = birthwt$low, yhat = as.numeric(fitted(back_mod) > pi0))
+```
+
+```{r}
+# sensitivity
+29 / 59
+```
+
+```{r}
+# specificity
+116 / 130
+```
+
+```{r}
+# accuracy
+(116+29) / 189
+```
+
+# 5. Summary
+
+- In our best model, `lwt`, `ptl`, `ht`, `ftv`, `age:ftv`, `ptl:ui` are significant factors that are associated with low infant birthweight at a level of 0.05
+- The factors of our best model to predict low birthweight included `age`, `lwt`, `smoke`, `ptl`, `ht`, `ui`, `ftv`, `age:ftv`, `lwt:smoke`, `lwt:ui`, `ptl:ui`. The best link function is the logit link due to its highest area under the ROC curve. The AIC score of our best model is 208.8
+- The highest accuracy (77%) is achieved when we used a cutoff of 0.5, with a 50% sensitivity and 90% specificity.
+- 80% sensitivity can be achieved when we used a cutoff of 0.27, the corresponding specificity is 67%.
+- 90% sensitivity can be achieved when we used a cutoff of 0.19, the corresponding specificity is 50%.
+- 95% sensitivity can be achieved when we used a cutoff of 0.13, the corresponding specificity is 32%.
+- 98% sensitivity can be achieved when we used a cutoff of 0.11, the corresponding specificity is 30%.
+- 100% sensitivity can be achieved when we used a cutoff of 0.05, the corresponding specificity is 17%.
+
+# 6. References
+
+https://www.marchofdimes.org/complications/low-birthweight.aspx
+
+https://en.wikipedia.org/wiki/Low_birth_weight
